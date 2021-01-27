@@ -4,7 +4,7 @@ from discord.ext import commands
 import datetime
 import asyncio
 import random
-import aiofiles
+
 
 
 
@@ -23,21 +23,7 @@ client = commands.Bot(command_prefix = get_prefix)
 @client.event
 async def on_ready():
 
-	client.welcome_channels = {} 
-	client.goodbye_channels = {}
-
 	
-	async with aiofiles.open("welcome_channels.txt", mode="r") as file:
-		lines = await file.readlines()
-		for line in lines:
-			data = line.split(" ")
-			client.welcome_channels[int(data[0])] = (int(data[1]), " ".join(data[2:]).strip("\n"))
-
-	async with aiofiles.open("goodbye_channels.txt", mode="r") as file:
-		lines = await file.readlines()
-		for line in lines:
-			data = line.split(" ")
-			client.goodbye_channels[int(data[0])] = (int(data[1]), " ".join(data[2:]).strip("\n"))
 
 	await client.change_presence(activity=discord.Game(name=f"on {len(client.guilds)} servers | .help"))
 
@@ -96,44 +82,6 @@ async def on_guild_remove(guild):
 async def invite(ctx):
 	await ctx.author.send("To invite me use this: https://discord.com/api/oauth2/authorize?client_id=800743017958080522&permissions=8&scope=bot")
 
-
-@client.command()
-async def set_welcome_channel(ctx, new_channel: discord.TextChannel=None, *, message=None):
-	if new_channel != None and message != None:
-		for channel in ctx.guild.channels:
-			if channel == new_channel:
-				client.welcome_channels[ctx.guild.id] = (channel.id, message)
-				await ctx.channel.send(f"Welcome channel has been set to: {channel.name} with the message {message}")
-				await channel.send("This is the new welcome channel!")
-                
-				async with aiofiles.open("welcome_channels.txt", mode="a") as file:
-					await file.write(f"{ctx.guild.id} {new_channel.id} {message}\n")
-
-				return
-
-		await ctx.channel.send("Couldn't find the given channel.")
-
-	else:
-		await ctx.channel.send("You didn't include the name of a welcome channel or a welcome message.")
-
-@client.command()
-async def set_goodbye_channel(ctx, new_channel: discord.TextChannel=None, *, message=None):
-	if new_channel != None and message != None:
-		for channel in ctx.guild.channels:
-			if channel == new_channel:
-				client.goodbye_channels[ctx.guild.id] = (channel.id, message)
-				await ctx.channel.send(f"Goodbye channel has been set to: {channel.name} with the message {message}")
-				await channel.send("This is the new goodbye channel!")
-                
-				async with aiofiles.open("goodbye_channels.txt", mode="a") as file:
-					await file.write(f"{ctx.guild.id} {new_channel.id} {message}\n")
-
-				return
-
-		await ctx.channel.send("Couldn't find the given channel.")
-
-	else:
-		await ctx.channel.send("You didn't include the name of a goodbye channel or a goodbye message.")
 
 
 
