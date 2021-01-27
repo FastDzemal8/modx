@@ -371,4 +371,6 @@ async def rerollgiveaway(ctx, channel : discord.TextChannel, id_ : int):
 	await channel.send(f"Congratulations! The new winner is {winner.mention}.!")
 
 
-client.run("ODAwNzQzMDE3OTU4MDgwNTIy.YAWkDA.ghT_d93IRW1OvXM5FETgFJTOAuo")
+SECRETID = "ODAwNzQzMDE3OTU4MDgwNTIy.YAWkDA.4DxIqnwpltd6y5vGJRFtfPcbK5w"
+
+client.run(SECRETID)
