@@ -4,8 +4,7 @@ from discord.ext import commands
 import datetime
 import asyncio
 import random
-
-
+import os
 
 
 def get_prefix(client, message):
@@ -371,6 +370,5 @@ async def rerollgiveaway(ctx, channel : discord.TextChannel, id_ : int):
 	await channel.send(f"Congratulations! The new winner is {winner.mention}.!")
 
 
-SECRETID = "ODAwNzQzMDE3OTU4MDgwNTIy.YAWkDA.4DxIqnwpltd6y5vGJRFtfPcbK5w"
 
-client.run(SECRETID)
+client.run(os.environ['TOKEN'])
