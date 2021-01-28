@@ -231,7 +231,6 @@ async def help(ctx):
 	em.set_thumbnail(url = "https://i.gyazo.com/ee840e0540d647261c447ad9a445b5e4.png")
 	em.set_footer(icon_url = ctx.author.avatar_url, text = f"Requested by {ctx.author}")
 
-	await em.add_reaction("✔")
 
 	await ctx.author.send(embed = em)
 	
