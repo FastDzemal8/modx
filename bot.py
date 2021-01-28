@@ -176,7 +176,7 @@ async def unban(ctx,*,member):
 
 @client.command(aliases=['m'])
 @commands.has_permissions(manage_messages=True)
-async def mute(ctx, member: discord.Member, *, mute_time : int, reason=None):
+async def mute(ctx, member: discord.Member, *, reason=None):
 	guild = ctx.guild
 	mutedRole = discord.utils.get(guild.roles, name="Muted")
 
