@@ -189,8 +189,7 @@ async def mute(ctx, member: discord.Member, *, reason=None):
 	await member.add_roles(mutedRole, reason=reason)
 	await ctx.send(f"**Muted {member.mention}. Reason: {reason}**")
 	await member.send(f"**You were muted in the server: {guild.name}. Reason: {reason}.")
-	await asyncio.sleep(mute_time)
-	await member.remove_roles(role)
+
 
 @client.command(aliases=['um'])
 @commands.has_permissions(manage_messages=True)
