@@ -7,42 +7,13 @@ import random
 import os
 
 
-def get_prefix(client, message):
-	with open('prefixes.json', 'r') as f:
-		prefixes = json.load(f)
 
-	return prefixes[str(message.guild.id)]
-
-client = commands.Bot(command_prefix = get_prefix)
-
-@client.event
-async def on_guild_join(guild):
-	with open('prefixes.json', 'r') as f:
-		prefixes = json.load(f)
-
-	prefixes[str(guild.id)] = '.'
-
-	with open('prefixes.json', 'w')	as f:
-		json.dump(prefixes, f, indent=4)
-
-@client.event
-async def on_guild_remove(guild):
-	with open('prefixes.json', 'r') as f:
-		prefixes = json.load(f)
-
-	prefixes.pop(str(guild.id))
-
-	with open('prefixes.json', 'w')	as f:
-		json.dump(prefixes, f, indent=4)
+client = commands.Bot(command_prefix = ">")
 
 
 	
 
-		
-intents = discord.Intents.default()
-intents.members = True
 
- # guild_id : {member_id: [count, [(admin_id, reason)]]}
 
 
 
@@ -94,18 +65,7 @@ async def invite(ctx):
 
 
 
-@client.command()
-@commands.has_permissions(administrator=True)
-async def changeprefix(ctx, prefix):
-	with open('prefixes.json', 'r') as f:
-	 	prefixes = json.load(f)
-	
-	prefixes[str(ctx.guild.id)] = prefix
-	
-	with open('prefixes.json', 'w')	as f:
-		json.dump(prefixes, f, indent=4)
 
-	await ctx.send(f'Prefix changed to: `{prefix}`')
 	
 
 @client.command()
@@ -115,13 +75,7 @@ async def poll(ctx,*,message):
 	await msg.add_reaction('👍')
 	await msg.add_reaction('👎')
 
-@client.event
-async def on_message(msg):
-	for word in filtered_words:
-		if word in msg.content:
-			await msg.delete()
-	
-	await client.process_commands(msg)
+
 
 
 @client.command()
