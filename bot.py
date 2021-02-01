@@ -7,6 +7,26 @@ import random
 import os
 
 
+@client.event
+async def on_guild_join(guild):
+	with open('prefixes.json', 'r') as f:
+		prefixes = json.load(f)
+
+	prefixes[str(guild.id)] = '.'
+
+	with open('prefixes.json', 'w')	as f:
+		json.dump(prefixes, f, indent=4)
+
+@client.event
+async def on_guild_remove(guild):
+	with open('prefixes.json', 'r') as f:
+		prefixes = json.load(f)
+
+	prefixes.pop(str(guild.id))
+
+	with open('prefixes.json', 'w')	as f:
+		json.dump(prefixes, f, indent=4)
+
 
 def get_prefix(client, message):
 	with open('prefixes.json', 'r') as f:
@@ -58,25 +78,7 @@ def convert(time):
 
 
 
-@client.event
-async def on_guild_join(guild):
-	with open('prefixes.json', 'r') as f:
-		prefixes = json.load(f)
 
-	prefixes[str(guild.id)] = '.'
-
-	with open('prefixes.json', 'w')	as f:
-		json.dump(prefixes, f, indent=4)
-
-@client.event
-async def on_guild_remove(guild):
-	with open('prefixes.json', 'r') as f:
-		prefixes = json.load(f)
-
-	prefixes.pop(str(guild.id))
-
-	with open('prefixes.json', 'w')	as f:
-		json.dump(prefixes, f, indent=4)
 
 
 
