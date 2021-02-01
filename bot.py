@@ -1,338 +1,460 @@
-import discord
-import json
-from discord.ext import commands
-import datetime
 import asyncio
-import random
-import os
+import math
+import aiosqlite
+import aiofiles
+import discord
+from discord.ext import commands
 
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix = "c!", intents=intents)
 
-
-client = commands.Bot(command_prefix = ">")
-
-
-	
-
-
-
-
-
-@client.event
+#bot events
+@bot.event
 async def on_ready():
+    bot.reaction_roles = []
+    bot.welcome_channels = {} # store like {guild_id : (channel_id, message)}
+    bot.goodbye_channels = {}
+    bot.sniped_messages = {}
+    bot.ticket_configs = {}
+    bot.warnings = {}
+    bot.multiplier = 1
+    
+    async with aiosqlite.connect("guilddata.db") as db:
+        for guild in bot.guilds:
+            async with aiofiles.open(f"{guild.id}.txt", mode="a") as temp:
+                pass
+
+            await db.execute(f"CREATE TABLE IF NOT EXISTS guild_{guild.id} (user_id int PRIMARY KEY, exp int)")
 
 
-	await client.change_presence(activity=discord.Game(name=f"on {len(client.guilds)} servers | .help"))
+        bot.warnings[guild.id] = {}
+    
+    for file in ["reaction_roles.txt", "welcome_channels.txt", "goodbye_channels.txt", "ticket_configs.txt"]:
+        async with aiofiles.open(file, mode="a") as temp:
+            pass
 
-	print("Your bot is ready.")
+    async with aiofiles.open("reaction_roles.txt", mode="r") as file:
+        lines = await file.readlines()
+        for line in lines:
+            data = line.split(" ")
+            bot.reaction_roles.append((int(data[0]), int(data[1]), data[2].strip("\n")))
 
-async def ch_pr():
-	await client.wait_until_ready()
-	statuses = [f"on {len(client.guilds)} servers | .help"]
-	while not client.is_closed():
-		status = random.choice(statuses)
+    async with aiofiles.open("welcome_channels.txt", mode="r") as file:
+        lines = await file.readlines()
+        for line in lines:
+            data = line.split(" ")
+            bot.welcome_channels[int(data[0])] = (int(data[1]), " ".join(data[2:]).strip("\n"))
 
-def convert(time):
-    pos = ["s","m","h","d"]
+    async with aiofiles.open("goodbye_channels.txt", mode="r") as file:
+        lines = await file.readlines()
+        for line in lines:
+            data = line.split(" ")
+            bot.goodbye_channels[int(data[0])] = (int(data[1]), " ".join(data[2:]).strip("\n"))
 
-    time_dict = {"s" : 1, "m" : 60, "h" : 3600 , "d" : 3600*24}
+    async with aiofiles.open("ticket_configs.txt", mode="r") as file:
+        lines = await file.readlines()
+        for line in lines:
+            data = line.split(" ")
+            bot.ticket_configs[int(data[0])] = [int(data[1]), int(data[2]), int(data[3])]
 
-    unit = time[-1]
+    for guild in bot.guilds:
+        async with aiofiles.open(f"{guild.id}.txt", mode="r") as file:
+            lines = await file.readlines()
 
-    if unit not in pos:
-        return -1
+            for line in lines:
+                data = line.split(" ")
+                member_id = int(data[0])
+                admin_id = int(data[1])
+                reason = " ".join(data[2:]).strip("\n")
+
+                try:
+                    bot.warnings[guild.id][member_id][0] += 1
+                    bot.warnings[guild.id][member_id][1].append((admin_id, reason))
+
+                except KeyError:
+                    bot.warnings[guild.id][member_id] = [1, [(admin_id, reason)]]
+                    
+    print("Your bot is ready.")
+
+@bot.event
+async def on_guild_join(guild):
+    bot.warnings[guild.id] = {}
+    async with aiosqlite.connect("guilddata.db") as db:
+        await db.execute(f"CREATE TABLE IF NOT EXISTS guild_{guild.id} (user_id int PRIMARY KEY, exp int)")
+
+@bot.event
+async def on_guild_remove(guild):
+    async with aiosqlite.connect("guilddata.db") as db:
+        await db.execute(f"DROP TABLE IF EXISTS guild_{guild.id}")
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    for role_id, msg_id, emoji in bot.reaction_roles:
+        if msg_id == payload.message_id and emoji == str(payload.emoji.name.encode("utf-8")):
+            await payload.member.add_roles(bot.get_guild(payload.guild_id).get_role(role_id))
+            return
+
+    if payload.member.id != bot.user.id and str(payload.emoji) == u"\U0001F3AB":
+        msg_id, channel_id, category_id = bot.ticket_configs[payload.guild_id]
+
+        if payload.message_id == msg_id:
+            guild = bot.get_guild(payload.guild_id)
+
+            for category in guild.categories:
+                if category.id == category_id:
+                    break
+
+            channel = guild.get_channel(channel_id)
+
+            ticket_num = 1 if len(category.channels) == 0 else int(category.channels[-1].name.split("-")[1]) + 1
+            ticket_channel = await category.create_text_channel(f"ticket {ticket_num}", topic=f"A channel for ticket number {ticket_num}.", permission_synced=True)
+
+            await ticket_channel.set_permissions(payload.member, read_messages=True, send_messages=True)
+
+            message = await channel.fetch_message(msg_id)
+            await message.remove_reaction(payload.emoji, payload.member)
+
+            await ticket_channel.send(f"{payload.member.mention} Thank you for creating a ticket! Use **'-close'** to close your ticket.")
+
+            try:
+                await bot.wait_for("message", check=lambda m: m.channel == ticket_channel and m.author == payload.member and m.content == "-close", timeout=3600)
+
+            except asyncio.TimeoutError:
+                await ticket_channel.delete()
+
+            else:
+                await ticket_channel.delete()
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    for role_id, msg_id, emoji in bot.reaction_roles:
+        if msg_id == payload.message_id and emoji == str(payload.emoji.name.encode("utf-8")):
+            guild = bot.get_guild(payload.guild_id)
+            await guild.get_member(payload.user_id).remove_roles(guild.get_role(role_id))
+            return
+
+@bot.event
+async def on_member_join(member):
+    for guild_id in bot.welcome_channels:
+        if guild_id == member.guild.id:
+            channel_id, message = bot.welcome_channels[guild_id]
+            await bot.get_guild(guild_id).get_channel(channel_id).send(f"{message} {member.mention}")
+            return
+
+@bot.event
+async def on_member_remove(member):
+    for guild_id in bot.goodbye_channels:
+        if guild_id == member.guild.id:
+            channel_id, message = bot.goodbye_channels[guild_id]
+            await bot.get_guild(guild_id).get_channel(channel_id).send(f"{message} {member.mention}")
+            return
+
+@bot.event
+async def on_message_delete(message):
+    bot.sniped_messages[message.guild.id] = (message.content, message.author, message.channel.name, message.created_at)
+
+@bot.event
+async def on_message(message):
+    if not message.author.bot:
+        async with aiosqlite.connect("guilddata.db") as db:
+            cursor = await db.execute(f"INSERT OR IGNORE INTO guild_{message.guild.id} (user_id, exp) VALUES (?,?)", (message.author.id, 1)) 
+
+            if cursor.rowcount == 0:
+                await db.execute(f"UPDATE guild_{message.guild.id} SET exp = exp + 1 WHERE user_id = ?", (message.author.id,))
+                cur = await db.execute(f"SELECT exp FROM guild_{message.guild.id} WHERE user_id = ?", (message.author.id,))
+                data = await cur.fetchone()
+                exp = data[0]
+                lvl = math.sqrt(exp) / bot.multiplier
+            
+                if lvl.is_integer():
+                    await message.channel.send(f"{message.author.mention} well done! You're now level: {int(lvl)}.")
+
+            await db.commit()
+
+    await bot.process_commands(message)
+
+#bot commands
+@bot.command()
+async def stats(ctx, member: discord.Member=None):
+    if member is None: member = ctx.author
+
+    # get user exp
+    async with aiosqlite.connect("guilddata.db") as db:
+        async with db.execute(f"SELECT exp FROM guild_{ctx.guild.id} WHERE user_id = ?", (member.id,)) as cursor:
+            data = await cursor.fetchone()
+            exp = data[0]
+
+        # calculate rank
+        async with db.execute(f"SELECT exp FROM guild_{ctx.guild.id}") as cursor:
+            rank = 1
+            async for value in cursor:
+                if exp < value[0]:
+                    rank += 1
+
+    lvl = int(math.sqrt(exp)//bot.multiplier)
+
+    current_lvl_exp = (bot.multiplier*(lvl))**2
+    next_lvl_exp = (bot.multiplier*((lvl+1)))**2
+
+    lvl_percentage = ((exp-current_lvl_exp) / (next_lvl_exp-current_lvl_exp)) * 100
+
+    embed = discord.Embed(title=f"Stats for {member.name}", colour=discord.Colour.gold())
+    embed.add_field(name="Level", value=str(lvl))
+    embed.add_field(name="Exp", value=f"{exp}/{next_lvl_exp}")
+    embed.add_field(name="Rank", value=f"{rank}/{ctx.guild.member_count}")
+    embed.add_field(name="Level Progress", value=f"{round(lvl_percentage, 2)}%")
+
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def leaderboard(ctx): 
+    buttons = {}
+    for i in range(1, 6):
+        buttons[f"{i}\N{COMBINING ENCLOSING KEYCAP}"] = i # only show first 5 pages
+
+    previous_page = 0
+    current = 1
+    index = 1
+    entries_per_page = 10
+
+    embed = discord.Embed(title=f"Leaderboard Page {current}", description="", colour=discord.Colour.gold())
+    msg = await ctx.send(embed=embed)
+
+    for button in buttons:
+        await msg.add_reaction(button)
+
+    async with aiosqlite.connect("guilddata.db") as db:
+        while True:
+            if current != previous_page:
+                embed.title = f"Leaderboard Page {current}"
+                embed.description = ""
+
+                async with db.execute(f"SELECT * FROM guild_{ctx.guild.id} ORDER BY exp DESC LIMIT ? OFFSET ?", (entries_per_page, entries_per_page*(current-1),)) as cursor:
+                    index = entries_per_page*(current-1)
+
+                    async for entry in cursor:
+                        index += 1
+                        member_id, exp = entry
+                        member = ctx.guild.get_member(member_id)
+                        embed.description += f"{index}) {member.mention} : {exp}\n"
+
+                    await msg.edit(embed=embed)
+
+            try:
+                reaction, user = await bot.wait_for("reaction_add", check=lambda reaction, user: user == ctx.author and reaction.emoji in buttons, timeout=60.0)
+
+            except asyncio.TimeoutError:
+                return await msg.clear_reactions()
+
+            else:
+                previous_page = current
+                await msg.remove_reaction(reaction.emoji, ctx.author)
+                current = buttons[reaction.emoji]
+                
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def warnings(ctx, member: discord.Member=None):
+    if member is None:
+        return await ctx.send("The provided member could not be found or you forgot to provide one.")
+    
+    embed = discord.Embed(title=f"Displaying Warnings for {member.name}", description="", colour=discord.Colour.red())
     try:
-        val = int(time[:-1])
+        i = 1
+        for admin_id, reason in bot.warnings[ctx.guild.id][member.id][1]:
+            admin = ctx.guild.get_member(admin_id)
+            embed.description += f"**Warning {i}** given by: {admin.mention} for: *'{reason}'*.\n"
+            i += 1
+
+        await ctx.send(embed=embed)
+
+    except KeyError: # no warnings
+        await ctx.send("This user has no warnings.")
+        
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def warn(ctx, member: discord.Member=None, *, reason=None):
+    if member is None:
+        return await ctx.send("The provided member could not be found or you forgot to provide one.")
+        
+    if reason is None:
+        return await ctx.send("Please provide a reason for warning this user.")
+
+    try:
+        first_warning = False
+        bot.warnings[ctx.guild.id][member.id][0] += 1
+        bot.warnings[ctx.guild.id][member.id][1].append((ctx.author.id, reason))
+
+    except KeyError:
+        first_warning = True
+        bot.warnings[ctx.guild.id][member.id] = [1, [(ctx.author.id, reason)]]
+
+    count = bot.warnings[ctx.guild.id][member.id][0]
+
+    async with aiofiles.open(f"{member.guild.id}.txt", mode="a") as file:
+        await file.write(f"{member.id} {ctx.author.id} {reason}\n")
+
+    await ctx.send(f"{member.mention} has {count} {'warning' if first_warning else 'warnings'}.")
+
+@bot.command()
+async def configure_ticket(ctx, msg: discord.Message=None, category: discord.CategoryChannel=None):
+    if msg is None or category is None:
+        await ctx.channel.send("Failed to configure the ticket as an argument was not given or was invalid.")
+        return
+
+    bot.ticket_configs[ctx.guild.id] = [msg.id, msg.channel.id, category.id] # this resets the configuration
+
+    async with aiofiles.open("ticket_configs.txt", mode="r") as file:
+        data = await file.readlines()
+
+    async with aiofiles.open("ticket_configs.txt", mode="w") as file:
+        await file.write(f"{ctx.guild.id} {msg.id} {msg.channel.id} {category.id}\n")
+
+        for line in data:
+            if int(line.split(" ")[0]) != ctx.guild.id:
+                await file.write(line)
+                
+
+    await msg.add_reaction(u"\U0001F3AB")
+    await ctx.channel.send("Succesfully configured the ticket system.")
+
+@bot.command()
+async def ticket_config(ctx):
+    try:
+        msg_id, channel_id, category_id = bot.ticket_configs[ctx.guild.id]
+
+    except KeyError:
+        await ctx.channel.send("You have not configured the ticket system yet.")
+
+    else:
+        embed = discord.Embed(title="Ticket System Configurations", color=discord.Color.green())
+        embed.description = f"**Reaction Message ID** : {msg_id}\n"
+        embed.description += f"**Ticket Category ID** : {category_id}\n\n"
+
+        await ctx.channel.send(embed=embed)
+        
+@bot.command()
+async def snipe(ctx):
+    try:
+        contents, author, channel_name, time = bot.sniped_messages[ctx.guild.id]
+        
     except:
-        return -2
+        await ctx.channel.send("Couldn't find a message to snipe!")
+        return
 
+    embed = discord.Embed(description=contents, color=discord.Color.purple(), timestamp=time)
+    embed.set_author(name=f"{author.name}#{author.discriminator}", icon_url=author.avatar_url)
+    embed.set_footer(text=f"Deleted in : #{channel_name}")
 
-    return val * time_dict[unit]
+    await ctx.channel.send(embed=embed)
+    
+@bot.command()
+async def set_reaction(ctx, role: discord.Role=None, msg: discord.Message=None, emoji=None):
+    if role != None and msg != None and emoji != None:
+        await msg.add_reaction(emoji)
+        bot.reaction_roles.append((role.id, msg.id, str(emoji.encode("utf-8"))))
+        
+        async with aiofiles.open("reaction_roles.txt", mode="a") as file:
+            emoji_utf = emoji.encode("utf-8")
+            await file.write(f"{role.id} {msg.id} {emoji_utf}\n")
 
+        await ctx.channel.send("Reaction has been set.")
+        
+    else:
+        await ctx.send("Invalid arguments.")
 
+@bot.command()
+async def set_welcome_channel(ctx, new_channel: discord.TextChannel=None, *, message=None):
+    if new_channel != None and message != None:
+        for channel in ctx.guild.channels:
+            if channel == new_channel:
+                bot.welcome_channels[ctx.guild.id] = (channel.id, message)
+                await ctx.channel.send(f"Welcome channel has been set to: {channel.name} with the message {message}")
+                await channel.send("This is the new welcome channel!")
+                
+                async with aiofiles.open("welcome_channels.txt", mode="a") as file:
+                    await file.write(f"{ctx.guild.id} {new_channel.id} {message}\n")
 
+                return
 
+        await ctx.channel.send("Couldn't find the given channel.")
 
+    else:
+        await ctx.channel.send("You didn't include the name of a welcome channel or a welcome message.")
 
+@bot.command()
+async def set_goodbye_channel(ctx, new_channel: discord.TextChannel=None, *, message=None):
+    if new_channel != None and message != None:
+        for channel in ctx.guild.channels:
+            if channel == new_channel:
+                bot.goodbye_channels[ctx.guild.id] = (channel.id, message)
+                await ctx.channel.send(f"Goodbye channel has been set to: {channel.name} with the message {message}")
+                await channel.send("This is the new goodbye channel!")
+                
+                async with aiofiles.open("goodbye_channels.txt", mode="a") as file:
+                    await file.write(f"{ctx.guild.id} {new_channel.id} {message}\n")
 
+                return
 
+        await ctx.channel.send("Couldn't find the given channel.")
 
+    else:
+        await ctx.channel.send("You didn't include the name of a goodbye channel or a goodbye message.")
 
-
-@client.command()
-async def invite(ctx):
-	await ctx.author.send("To invite me use this: https://discord.com/api/oauth2/authorize?client_id=800743017958080522&permissions=8&scope=bot")
-
-
-
-
-
-	
-
-@client.command()
-async def poll(ctx,*,message):
-	emb=discord.Embed(title="POLL", description=f"{message}")
-	msg=await ctx.channel.send(embed=emb)
-	await msg.add_reaction('👍')
-	await msg.add_reaction('👎')
-
-
-
-
-@client.command()
+@bot.command()
 async def hello(ctx):
-	await ctx.send("hi")
-
-
-
-filtered_words = ["fuck","shit","motherfucker","assholer","krab","dick","pussy","pucci","idiot"]
-
-
-
-@client.command(aliases=['c','purge'])
-@commands.has_permissions(manage_messages = True)
-async def clear(ctx,amount=5):
-    await ctx.channel.purge(limit = amount)
-
-@client.command(aliases=['k'])
-@commands.has_permissions(kick_members = True)
-async def kick(ctx,member : discord.Member,*,reason= "No reason provided"):
-	try:
-		await member.send("You have been kicked from server. Reason:"+reason)
-	except:
-		await ctx.send("The member was kicked; but their dms are closed!")
-	
-	await member.kick(reason=reason)
-
-
-@client.event
-async def on_command_error(ctx,error):
-	if isinstance(error,commands.MissingPermissions):
-		await ctx.send("You don't have permission to do that! ;-;")
-	elif isinstance(error,commands.MissingRequiredArgument):
-		await ctx.send("Please enter all the required args.")		
-
-@client.command(aliases=['b','ez'])
-@commands.has_permissions(ban_members = True)
-async def ban(ctx,member : discord.Member,*,reason= "No reason provided"):
-	
-	await ctx.send(member.mention +" has been banned from the server. Reason: "+reason)
-
-	await member.ban(reason=reason)
-
-@client.command(aliases=['ub','unez'])
-@commands.has_permissions(ban_members = True)
-async def unban(ctx,*,member):
-	banned_users = await ctx.guild.bans()
-	member_name, member_disc = member.split('#')
-	
-	for banned_entry in banned_users:
-		user = banned_entry.user
-
-		if(user.name, user.discriminator)==(member_name, member_disc):
-
-			await ctx.guild.unban(user)
-			await ctx.send(member_name +" has been unbanned!")
-			return
-
-	await ctx.send(member+" was not found")
-
-@client.command(aliases=['m'])
-@commands.has_permissions(manage_messages=True)
-async def mute(ctx, member: discord.Member, *, reason=None):
-	guild = ctx.guild
-	mutedRole = discord.utils.get(guild.roles, name="Muted")
-
-	if not mutedRole:
-		mutedRole = await guild.create_role(name="Muted")
-
-		for channel in guild.channels:
-			await channel.set_permissions(mutedRole, speak=False, send_messages=False, read_message_history=True, read_messages=False)
-
-	await member.add_roles(mutedRole, reason=reason)
-	await ctx.send(f"**Muted {member.mention}. Reason: {reason}**")
-	await member.send(f"**You were muted in the server: {guild.name}. Reason: {reason}.")
-
-
-@client.command(aliases=['um'])
-@commands.has_permissions(manage_messages=True)
-async def unmute(ctx, member: discord.Member):
-	mutedRole = discord.utils.get(ctx.guild.roles, name="Muted")
-
-	await member.remove_roles(mutedRole)
-	await ctx.send(f"**Unmuted {member.mention}!**")
-	await member.send(f"**You were unmuted in the server {ctx.guild.name}**")
-
-
-@client.command(aliases=['user','info'])
-async def whois(ctx, member : discord.Member):
-	embed = discord.Embed(title = member.name , description = member.mention , color = discord.Color.green())
-	embed.add_field(name = "ID", value = member.id , inline = True )
-	embed.set_thumbnail(url = member.avatar_url)
-	
-	embed.set_footer(icon_url = ctx.author.avatar_url, text = f"Requested by {ctx.author}")
-	
-	await ctx.send(embed=embed)
-
-
-
-
-
-
-client.remove_command("help")
-
-
-@client.group(invoke_without_command=True)
-async def help(ctx):
-	em = discord.Embed(title = "Help", description = "Here is a list of command categories.", color = discord.Colour.green())
-
-	em.add_field(name = "Moderation", value = "Type `.moderation` to get list of moderation commands!", inline = True)
-	em.add_field(name = "Fun", value = "Type `.fun` to see fun commands!", inline = True)
-	em.add_field(name = "Information", value = "Type `.infocmds` to see list of information commands!", inline = True)
-	em.add_field(name = "Giveaways", value = "Type `.ghelp` to see list of giveaway commands!", inline = True)
-	em.add_field(name = "Invite", value = "Type `.invite` to get my invite link!", inline = True)
-
-	em.set_thumbnail(url = "https://i.gyazo.com/ee840e0540d647261c447ad9a445b5e4.png")
-	em.set_footer(icon_url = ctx.author.avatar_url, text = f"Requested by {ctx.author}")
-
-
-	await ctx.author.send(embed = em)
-	
-
-
-@client.command(aliases=['mod'])
-async def moderation(ctx):
-	embed = discord.Embed(title = "Moderation Commands" , description = "Commands" , color = discord.Color.green())
-	embed.add_field(name = "Kick", value = "Usage: `.kick <member/id> [reason]` Aliases: k", inline = True)
-	embed.add_field(name = "Ban", value = "Usage: `.ban <member/id> [reason]` Aliases: b , ez", inline = True)
-	embed.add_field(name = "Mute", value = "Usage: `.mute <member/id>` Aliases: m", inline = True)
-	embed.add_field(name = "Change Prefix", value = "Usage: `.changeprefix <newprefix>`", inline = True)
-	embed.add_field(name = "Clear", value = "Usage: `.clear <amount>` Aliases: c , purge", inline = True)
-	embed.set_thumbnail(url = "https://i.gyazo.com/72813ce44477bf1c5f28a58a3d2d237b.png")
-	embed.set_footer(icon_url = ctx.author.avatar_url, text = f"Requested by {ctx.author}")
-	await ctx.send(embed=embed)
-
-
-@client.command()
-async def fun(ctx):
-	embed = discord.Embed(title = "Fun Commands" , description = "Commands" , color = discord.Color.blue())
-	embed.add_field(name = "Meme", value = "Usage: `.meme`", inline = True)
-	embed.set_thumbnail(url = "https://cdn.broadbandsearch.net/blog/most-popular-internet-memes-in-history/success-baby-fly.jpg")
-	embed.set_footer(icon_url = ctx.author.avatar_url, text = f"Requested by {ctx.author}")
-	await ctx.send(embed=embed)
-
-@client.command()
-async def infocmds(ctx):
-	embed = discord.Embed(title = "Information Commands" , description = "Commands:" , color = discord.Color.green())
-	embed.add_field(name = "Who is", value = "Usage: `.whois <member/id>` Aliases: user , info", inline = True)
-	embed.set_thumbnail(url = "https://i.gyazo.com/72813ce44477bf1c5f28a58a3d2d237b.png")
-	embed.set_footer(icon_url = ctx.author.avatar_url, text = f"Requested by {ctx.author}")
-	await ctx.send(embed=embed)
-
-@client.command()
-async def ghelp(ctx):
-	embed = discord.Embed(title = "Giveaway Commands" , description = "Commands")
-	embed.add_field(name = "Create Giveaway (Administrator Only)", value = "Usage: `.gcreate` Aliases: giveaway", inline = True)
-	embed.set_thumbnail(url = "https://images.emojiterra.com/google/android-11/128px/1f389.png")
-	embed.set_footer(icon_url = ctx.author.avatar_url, text = f"Requested by {ctx.author}")
-	await ctx.send(embed=embed)
-
-invitemsg = ["To invite me to your server use this link! :white_check_mark: https://discord.com/api/oauth2/authorize?client_id=800743017958080522&permissions=2146959351&scope=bot"]
-
-@client.command
-async def invite(ctx):
-	await ctx.author.send(invitemsg)
-
-@client.command(aliases=['gcreate'])
-@commands.has_permissions(administrator = True)
-async def giveaway(ctx):
-	await ctx.send("Let's start with this giveaway! Answer these questions within 15 seconds!")
-
-	questions = ["Which channel should it be hosted in?", 
-            	"What should be the duration of the giveaway? (s|m|h|d)",
-            	"What is the prize of the giveaway?"]
-
-	answers = []
-
-	def check(m):
-		return m.author == ctx.author and m.channel == ctx.channel 
-
-	for i in questions:
-		await ctx.send(i)
-
-		try:
-			msg = await client.wait_for('message', timeout=15.0, check=check)
-		except asyncio.TimeoutError:
-			await ctx.send('You didn\'t answer in time, please be quicker next time!')
-			return
-		else:
-			answers.append(msg.content)
-
-    
-	try:
-		c_id = int(answers[0][2:-1])
-	except:
-		await ctx.send(f"You didn't mention a channel properly. Do it like this {ctx.channel.mention} next time.")
-		return
-
-	channel = client.get_channel(c_id)
-
-	time = convert(answers[1])
-	if time == -1:
-		await ctx.send(f"You didn't answer the time with a proper unit. Use (s|m|h|d) next time!")
-		return
-	elif time == -2:
-		await ctx.send(f"The time must be an integer. Please enter an integer next time")
-		return            
-
-	prize = answers[2]
-
-	await ctx.send(f"The Giveaway will be in {channel.mention} and will last {answers[1]}!")
-
-
-	embed = discord.Embed(title = "Giveaway!", description = f"**Prize**: {prize}", color = ctx.author.color)
-
-	embed.add_field(name = "Hosted by:", value = ctx.author.mention)
-
-	embed.set_footer(text = f"Ends {answers[1]} from now!")
-
-	embed.set_thumbnail(url = "https://images.emojiterra.com/google/android-11/128px/1f389.png")
-
-	my_msg = await channel.send(embed = embed)
-
-
-	await my_msg.add_reaction("🎉")
-
-
-	await asyncio.sleep(time)
-
-
-	new_msg = await channel.fetch_message(my_msg.id)
-
-
-	users = await new_msg.reactions[0].users().flatten()
-	users.pop(users.index(client.user))
-
-	winner = random.choice(users)
-
-	await channel.send(f"**Giveaway ended!** **Winner:** {winner.mention}.  **Prize:** *{prize}* ")
-
-
-@client.command(aliases=['greroll'])
-@commands.has_permissions(administrator = True)
-async def rerollgiveaway(ctx, channel : discord.TextChannel, id_ : int):
-	try:
-		new_msg = await channel.fetch_message(id_)
-	except:
-		await ctx.send("The id was entered incorrectly.")
-		return
-    
-	users = await new_msg.reactions[0].users().flatten()
-	users.pop(users.index(client.user))
-
-	winner = random.choice(users)
-
-	await channel.send(f"Congratulations! The new winner is {winner.mention}.!")
-
-
-
-client.run(os.environ['TOKEN'])
+    channel = ctx.channel
+    await channel.send("Hi! " + str(ctx.author.mention))
+
+@bot.command()
+async def ping(ctx, arg=None, option=1):
+    if arg == "pong":
+        await ctx.channel.send("You've already ponged yourself!")
+
+    else:
+        await ctx.channel.send(str(ctx.author.mention) + " Pong!")
+
+    if option == 1:
+        await ctx.channel.send("You chose option one!")
+
+    else:
+        await ctx.channel.send("You chose option " + str(option))
+
+@bot.command()
+async def repeat(ctx, *, arg=None):
+    if arg == None:
+        await ctx.channel.send("You forgot to include an argument.")
+    else:
+        await ctx.channel.send(str(ctx.author.mention) + " " + str(arg))
+
+@bot.command()
+async def dm(ctx, user_id=None, *, args=None):
+    if user_id != None and args != None:
+        try:
+            target = await bot.fetch_user(user_id)
+            await target.send(args)
+
+            await ctx.channel.send("'" + args + "' sent to: " + target.name)
+
+        except:
+            await ctx.channel.send("Couldn't dm the given user.")
+        
+
+    else:
+        await ctx.channel.send("You didn't provide a user's id and/or a message.")
+
+@bot.command()
+async def dm_all(ctx, *, args=None):
+    if args != None:
+        members = ctx.guild.members
+        for member in members:
+            try:
+                await member.send(args)
+                print("'" + args + "' sent to: " + member.name)
+
+            except:
+                print("Couldn't send '" + args + "' to: " + member.name)
+
+    else:
+        await ctx.channel.send("A message was not provided.")
+
+bot.run(os.environ['TOKEN'])

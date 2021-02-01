@@ -1,0 +1,4 @@
+discord
+aiofile
+aiofiles
+aiosqlite
