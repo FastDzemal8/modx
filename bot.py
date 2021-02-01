@@ -7,6 +7,12 @@ import random
 import os
 
 
+def get_prefix(client, message):
+	with open('prefixes.json', 'r') as f:
+		prefixes = json.load(f)
+
+	return prefixes[str(message.guild.id)]
+
 client = commands.Bot(command_prefix = get_prefix)
 
 @client.event
@@ -30,11 +36,7 @@ async def on_guild_remove(guild):
 		json.dump(prefixes, f, indent=4)
 
 
-def get_prefix(client, message):
-	with open('prefixes.json', 'r') as f:
-		prefixes = json.load(f)
-
-	return prefixes[str(message.guild.id)]	
+	
 
 		
 intents = discord.Intents.default()
