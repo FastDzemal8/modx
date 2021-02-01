@@ -7,6 +7,8 @@ import random
 import os
 
 
+client = commands.Bot(command_prefix = get_prefix)
+
 @client.event
 async def on_guild_join(guild):
 	with open('prefixes.json', 'r') as f:
@@ -37,8 +39,8 @@ def get_prefix(client, message):
 		
 intents = discord.Intents.default()
 intents.members = True
-client = commands.Bot(command_prefix = get_prefix)
-client.warnings = {} # guild_id : {member_id: [count, [(admin_id, reason)]]}
+
+ # guild_id : {member_id: [count, [(admin_id, reason)]]}
 
 
 
